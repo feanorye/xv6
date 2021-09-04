@@ -40,7 +40,7 @@ ls(char *path)
     close(fd);
     return;
   }
-
+  // judge path type
   switch(st.type){
   case T_FILE:
     printf("%s %d %d %l\n", fmtname(path), st.type, st.ino, st.size);
@@ -54,11 +54,13 @@ ls(char *path)
     strcpy(buf, path);
     p = buf+strlen(buf);
     *p++ = '/';
+    //read files and dir
     while(read(fd, &de, sizeof(de)) == sizeof(de)){
       if(de.inum == 0)
         continue;
       memmove(p, de.name, DIRSIZ);
       p[DIRSIZ] = 0;
+      //reason stat not fstat: notfor new file
       if(stat(buf, &st) < 0){
         printf("ls: cannot stat %s\n", buf);
         continue;
@@ -67,6 +69,7 @@ ls(char *path)
     }
     break;
   }
+  // easy lose
   close(fd);
 }
 
