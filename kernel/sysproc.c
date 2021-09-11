@@ -95,3 +95,22 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+int sys_trace_switch = 0;
+int sys_trace_mode = 0;
+int sys_trace_pid = 0;
+uint64
+sys_trace(void)
+{
+  //int sys_trace_mode; ### bug-fix: repeat define mode
+  /*if(sys_trace_switch == 2){
+    printf("error saved %d\n", sys_trace_switch);
+  }
+  */
+  sys_trace_pid = myproc()->pid;
+  if (argint(0, &sys_trace_mode) < 0)
+    return -1;
+  //printf("mode: %d\n", sys_trace_mode);
+  sys_trace_switch = 1;
+  return 0;
+}
