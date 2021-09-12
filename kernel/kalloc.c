@@ -80,3 +80,16 @@ kalloc(void)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
 }
+
+int
+kfcount(){
+  struct run *pa;
+  int c = 0;
+  pa = kmem.freelist;
+  for (;;c++){
+    if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+      break;
+    pa = pa->next; //bug-fix: add to traverse next
+  }
+  return c * PGSIZE;
+}

@@ -96,21 +96,33 @@ sys_uptime(void)
   return xticks;
 }
 
-int sys_trace_switch = 0;
-int sys_trace_mode = 0;
-int sys_trace_pid = 0;
+
 uint64
 sys_trace(void)
 {
-  //int sys_trace_mode; ### bug-fix: repeat define mode
-  /*if(sys_trace_switch == 2){
-    printf("error saved %d\n", sys_trace_switch);
-  }
-  */
-  sys_trace_pid = myproc()->pid;
+  int sys_trace_mode;
+  struct proc *p = myproc();
+
   if (argint(0, &sys_trace_mode) < 0)
     return -1;
-  //printf("mode: %d\n", sys_trace_mode);
-  sys_trace_switch = 1;
+
+  acquire(&p->lock);
+  
+  p->iftrace = YES;
+  p->tracemode = sys_trace_mode;
+
+  release(&p->lock);
   return 0;
+}
+uint64
+sys_info(void)
+{
+  uint64 addr;
+  //printf("success: enter sys_info\n");
+  if (argaddr(0, &addr) < 0){
+    printf("error: argaddr\n");
+    exit(1);
+  }
+
+  return info(addr);
 }
