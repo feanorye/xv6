@@ -2715,6 +2715,7 @@ main(int argc, char *argv[])
       }
       int free1 = countfree();
       if(free1 < free0){
+        // bug1:need fix kstack did not free
         printf("FAILED -- lost %d free pages\n", free0 - free1);
         if(continuous != 2)
           exit(1);

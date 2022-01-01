@@ -21,12 +21,14 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
+  uint64 sz;
 } kmem;
 
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  kmem.sz=0;
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -58,7 +60,9 @@ kfree(void *pa)
 
   acquire(&kmem.lock);
   r->next = kmem.freelist;
+  //save pointer value,so r's value is not useful anymore
   kmem.freelist = r;
+  kmem.sz++;
   release(&kmem.lock);
 }
 
@@ -72,11 +76,21 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r){
     kmem.freelist = r->next;
+    kmem.sz--;
+  }
   release(&kmem.lock);
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+int
+ksize()
+{  
+  acquire(&kmem.lock);
+  int size = kmem.sz;
+  release(&kmem.lock);
+  return size;
 }
