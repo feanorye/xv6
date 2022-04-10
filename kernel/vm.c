@@ -59,6 +59,15 @@ kvminit_new()
   }
   memset(kernel_pagetable, 0, PGSIZE);
 
+  // uart registers
+  kvmmap_new(kernel_pagetable,UART0, UART0, PGSIZE, PTE_R | PTE_W);
+
+  // virtio mmio disk interface
+  kvmmap_new(kernel_pagetable,VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+
+  // CLINT
+  kvmmap_new(kernel_pagetable,CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+
   // PLIC
   kvmmap_new(kernel_pagetable,PLIC, PLIC, 0x400000, PTE_R | PTE_W);
 

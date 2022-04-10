@@ -532,9 +532,9 @@ void scheduler(void)
       /* kvminithart(); */
       if (p->state == RUNNABLE)
       {
-/*         w_satp(MAKE_SATP(p->kernel_pagetable));
+        w_satp(MAKE_SATP(p->kernel_pagetable));
         sfence_vma(); 
-        panic("kernel down"); */
+        //panic("kernel down");
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
@@ -548,7 +548,7 @@ void scheduler(void)
 
         found = 1;
       }
- /*      else{
+/*       else{
         kvminithart();
       } */
       release(&p->lock);
