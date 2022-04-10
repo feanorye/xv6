@@ -529,7 +529,7 @@ void scheduler(void)
     for (p = proc; p < &proc[NPROC]; p++)
     {
       acquire(&p->lock);
-      kvminithart();
+      /* kvminithart(); */
       if (p->state == RUNNABLE)
       {
 /*         w_satp(MAKE_SATP(p->kernel_pagetable));
