@@ -114,7 +114,7 @@ allocproc(void)
 
 found:
   p->pid = allocpid();
-  printf("\n\t#ksize:%d\n",ksize());
+  //printf("\n\t#ksize:%d\n",ksize());
 
   // Allocate a trapframe page.
   if ((p->trapframe = (struct trapframe *)kalloc()) == 0)
@@ -150,7 +150,7 @@ found:
   kvmmap_new(p->kernel_pagetable,va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
   p->kstack = va;
 
-  printf("\t#%d alloc kpt:%p,upt:%p\n",p->pid,p->kernel_pagetable,p->pagetable);
+  //printf("\t#%d alloc kpt:%p,upt:%p\n",p->pid,p->kernel_pagetable,p->pagetable);
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -174,7 +174,7 @@ freeproc(struct proc *p)
     proc_freepagetable(p->pagetable, p->sz);
   if (p->kernel_pagetable)
     proc_freeOnlyPagetable(p->kernel_pagetable,p->kstack);
-  printf("\n\t#ksize:%d\n\t#%d free kpt:%p\n",ksize(),p->pid,p->kernel_pagetable);
+  //printf("\n\t#ksize:%d\n\t#%d free kpt:%p\n",ksize(),p->pid,p->kernel_pagetable);
   p->pagetable = 0;
   p->kernel_pagetable=0;
   p->sz = 0;
@@ -259,6 +259,7 @@ void userinit(void)
 
   // allocate one user page and copy init's instructions
   // and data into it.
+  //uvminit(p->pagetable, p->kernel_pagetable, initcode, sizeof(initcode));
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
 
@@ -319,6 +320,14 @@ int fork(void)
     return -1;
   }
   np->sz = p->sz;
+
+  // sync new process upagetable to kpagetable
+/*   if (uvmsynckvm(np->pagetable, np->kernel_pagetable, np->sz) < 0)
+  {
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  } */
 
   np->parent = p;
 
@@ -520,10 +529,12 @@ void scheduler(void)
     for (p = proc; p < &proc[NPROC]; p++)
     {
       acquire(&p->lock);
+      kvminithart();
       if (p->state == RUNNABLE)
       {
-        w_satp(MAKE_SATP(p->kernel_pagetable));
-        sfence_vma();
+/*         w_satp(MAKE_SATP(p->kernel_pagetable));
+        sfence_vma(); 
+        panic("kernel down"); */
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
@@ -537,9 +548,9 @@ void scheduler(void)
 
         found = 1;
       }
-      else{
+ /*      else{
         kvminithart();
-      }
+      } */
       release(&p->lock);
     }
 #if !defined(LAB_FS)

@@ -59,15 +59,6 @@ kvminit_new()
   }
   memset(kernel_pagetable, 0, PGSIZE);
 
-  // uart registers
-  kvmmap_new(kernel_pagetable,UART0, UART0, PGSIZE, PTE_R | PTE_W);
-
-  // virtio mmio disk interface
-  kvmmap_new(kernel_pagetable,VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
-
-  // CLINT
-  kvmmap_new(kernel_pagetable,CLINT, CLINT, 0x10000, PTE_R | PTE_W);
-
   // PLIC
   kvmmap_new(kernel_pagetable,PLIC, PLIC, 0x400000, PTE_R | PTE_W);
 
@@ -111,6 +102,7 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
     panic("walk");
 
   for(int level = 2; level > 0; level--) {
+    // pte point to pagetable_of_level[ choosed ]
     pte_t *pte = &pagetable[PX(level, va)];
     if(*pte & PTE_V) {
       //  change pagetable point to next level
@@ -119,7 +111,7 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
       if(!alloc || (pagetable = (pde_t*)kalloc()) == 0)
         return 0;
       memset(pagetable, 0, PGSIZE);
-      // change current pte to point to new pagetable
+      // change current pte to point to new pagetable and set to valid
       *pte = PA2PTE(pagetable) | PTE_V;
     }
   }
@@ -162,7 +154,7 @@ void
 kvmmap_new(pagetable_t kernel_pagetable,uint64 va, uint64 pa, uint64 sz, int perm)
 {
   if(mappages(kernel_pagetable, va, sz, pa, perm) != 0)
-    panic("kvmmap");
+    panic("kvmmap_new");
 }
 
 // translate a kernel virtual address to
@@ -255,6 +247,7 @@ uvmcreate()
 // for the very first process.
 // sz must be less than a page.
 void
+//uvminit(pagetable_t pagetable, pagetable_t k_pagetable,uchar *src, uint sz)
 uvminit(pagetable_t pagetable, uchar *src, uint sz)
 {
   char *mem;
@@ -264,6 +257,7 @@ uvminit(pagetable_t pagetable, uchar *src, uint sz)
   mem = kalloc();
   memset(mem, 0, PGSIZE);
   mappages(pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X|PTE_U);
+  //mappages(k_pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X);
   memmove(mem, src, sz);
 }
 
@@ -274,11 +268,13 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 {
   char *mem;
   uint64 a;
+ /*  struct proc *p = myproc(); */
 
   if(newsz < oldsz)
     return oldsz;
-
+  // get next page position
   oldsz = PGROUNDUP(oldsz);
+  // address is growing continously
   for(a = oldsz; a < newsz; a += PGSIZE){
     mem = kalloc();
     if(mem == 0){
@@ -291,6 +287,13 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
       uvmdealloc(pagetable, a, oldsz);
       return 0;
     }
+    // sync upagetable and kpagetable
+/*     if(a > PLIC) panic("uvmalloc: va larger than PLIC");
+    if(mappages(p->kernel_pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R) != 0){
+      uvmdealloc(p->kernel_pagetable, a, oldsz);
+      panic("uvmalloc: sync fail");
+      return 0;
+    } */
   }
   return newsz;
 }
@@ -381,6 +384,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
+    // copy old content to new process content
     if((mem = kalloc()) == 0)
       goto err;
     memmove(mem, (char*)pa, PGSIZE);
@@ -394,6 +398,35 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
  err:
   uvmunmap(new, 0, i / PGSIZE, 1);
   return -1;
+}
+// Sync user_pagetable content to process's kernel_pagetable
+// This func should be called when you tried to change user pagetable
+// Including: fork/exec/sbrk
+int
+uvmsynckvm(pagetable_t upagetable, pagetable_t kpagetable, uint64 sz)
+{
+  pte_t *pte;
+  uint64 pa, i;
+  uint flags;
+  
+  if( sz >= PLIC ){
+    panic("uvmsynckvm: va is larger than PLIC");
+  }
+
+  for(i = 0; i < sz; i += PGSIZE){
+    if((pte = walk(upagetable, i, 0)) == 0)
+      panic("uvmsynckvm: pte should exist");
+    if((*pte & PTE_V) == 0)
+      panic("uvmsynckvm: page not present");
+    pa = PTE2PA(*pte);
+    // flags should change according kernel need
+    flags = PTE_FLAGS(*pte) & ~PTE_U;
+    if(mappages(kpagetable, i, PGSIZE, (uint64)pa, flags) != 0){
+      uvmunmap(kpagetable, 0, i / PGSIZE, 0);
+      return -1;
+    }
+  }
+  return 0;
 }
 
 // mark a PTE invalid for user access.
@@ -438,13 +471,17 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 // Copy len bytes to dst from virtual address srcva in a given page table.
 // Return 0 on success, -1 on error.
 int
+copyin_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len);
+// above declare new copyin
+int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
   uint64 n, va0, pa0;
 
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
+    pa0 = walkaddr(pagetable, va0); 
+    //pageTable may map to different pa
     if(pa0 == 0)
       return -1;
     n = PGSIZE - (srcva - va0);
@@ -456,6 +493,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     dst += n;
     srcva = va0 + PGSIZE;
   }
+  //return copyin_new(pagetable,dst, srcva,len);
   return 0;
 }
 
