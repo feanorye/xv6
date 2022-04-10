@@ -32,10 +32,24 @@ void procinit(void)
   {
     initlock(&p->lock, "proc");
 
+    // Add process kernel page table
+    p->kernel_pagetable = kvminit_new();
+    if (p->kernel_pagetable == 0)
+    {
+/*    proc_freepagetable(p->pagetable, PGSIZE);
+      freeproc(p);
+      release(&p->lock);
+      return 0; */
+      panic("procinit: process kernel_pagetable fail alloc");
+    }
+
     // Allocate a page for the process's kernel stack.
     // Map it high in memory, followed by an invalid
     // guard page.
-  /*
+  /* -----------------------
+   * removed to allocproc().
+   * by max.2022.04.10
+   * -----------------------
     char *pa = kalloc();
     if (pa == 0)
       panic("kalloc");
@@ -131,24 +145,17 @@ found:
     release(&p->lock);
     return 0;
   }
-  // Add process kernel page table
-  p->kernel_pagetable = kvminit_new();
-  if (p->kernel_pagetable == 0)
-  {
-    proc_freepagetable(p->pagetable, PGSIZE);
-    freeproc(p);
-    release(&p->lock);
-    return 0;
-  }
+
   // Allocate a page for the process's kernel stack.
   // Map it high in memory, followed by an invalid
   // guard page.
-  char *pa = kalloc();
+/*   char *pa = kalloc();
   if (pa == 0)
     panic("p->kernel pagetable kalloc");
   uint64 va = KSTACK((int)(p - proc));
+  kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
   kvmmap_new(p->kernel_pagetable,va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-  p->kstack = va;
+  p->kstack = va; */
 
   //printf("\t#%d alloc kpt:%p,upt:%p\n",p->pid,p->kernel_pagetable,p->pagetable);
   // Set up new context to start executing at forkret,
@@ -532,8 +539,8 @@ void scheduler(void)
       /* kvminithart(); */
       if (p->state == RUNNABLE)
       {
-        w_satp(MAKE_SATP(p->kernel_pagetable));
-        sfence_vma(); 
+/*         w_satp(MAKE_SATP(p->kernel_pagetable));
+        sfence_vma();  */
         //panic("kernel down");
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
