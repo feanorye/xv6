@@ -62,11 +62,11 @@ kvminit_new()
   // uart registers
   kvmmap_new(kernel_pagetable,UART0, UART0, PGSIZE, PTE_R | PTE_W);
 
+  /*// CLINT
+  kvmmap_new(kernel_pagetable,CLINT, CLINT, 0x10000, PTE_R | PTE_W); */
+
   // virtio mmio disk interface
   kvmmap_new(kernel_pagetable,VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
-
-  // CLINT
-  kvmmap_new(kernel_pagetable,CLINT, CLINT, 0x10000, PTE_R | PTE_W);
 
   // PLIC
   kvmmap_new(kernel_pagetable,PLIC, PLIC, 0x400000, PTE_R | PTE_W);
@@ -145,6 +145,26 @@ walkaddr(pagetable_t pagetable, uint64 va)
   if((*pte & PTE_V) == 0)
     return 0;
   if((*pte & PTE_U) == 0)
+    return 0;
+  pa = PTE2PA(*pte);
+  return pa;
+}
+// Look up a virtual address, return the physical address,
+// or 0 if not mapped.
+// Can be used to look up all pages.
+uint64
+walkaddr4k(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte;
+  uint64 pa;
+
+  if(va >= MAXVA)
+    return 0;
+
+  pte = walk(pagetable, va, 0);
+  if(pte == 0)
+    return 0;
+  if((*pte & PTE_V) == 0)
     return 0;
   pa = PTE2PA(*pte);
   return pa;
@@ -256,8 +276,8 @@ uvmcreate()
 // for the very first process.
 // sz must be less than a page.
 void
-//uvminit(pagetable_t pagetable, pagetable_t k_pagetable,uchar *src, uint sz)
-uvminit(pagetable_t pagetable, uchar *src, uint sz)
+uvminit(pagetable_t pagetable, pagetable_t k_pagetable,uchar *src, uint sz)
+//uvminit(pagetable_t pagetable, uchar *src, uint sz)
 {
   char *mem;
 
@@ -266,6 +286,7 @@ uvminit(pagetable_t pagetable, uchar *src, uint sz)
   mem = kalloc();
   memset(mem, 0, PGSIZE);
   mappages(pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X|PTE_U);
+  // exec() will create new pagetable, so this map is going to drop.
   //mappages(k_pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X);
   memmove(mem, src, sz);
 }
@@ -273,11 +294,10 @@ uvminit(pagetable_t pagetable, uchar *src, uint sz)
 // Allocate PTEs and physical memory to grow process from oldsz to
 // newsz, which need not be page aligned.  Returns new size or 0 on error.
 uint64
-uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+uvmalloc(pagetable_t pagetable, pagetable_t kernel_pgtable, uint64 oldsz, uint64 newsz)
 {
   char *mem;
   uint64 a;
- /*  struct proc *p = myproc(); */
 
   if(newsz < oldsz)
     return oldsz;
@@ -297,12 +317,12 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
       return 0;
     }
     // sync upagetable and kpagetable
-/*     if(a > PLIC) panic("uvmalloc: va larger than PLIC");
-    if(mappages(p->kernel_pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R) != 0){
-      uvmdealloc(p->kernel_pagetable, a, oldsz);
+    if(a > PLIC) panic("uvmalloc: va larger than PLIC");
+    if(mappages(kernel_pgtable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R) != 0){
+      uvmdealloc(kernel_pgtable, a, oldsz);
       panic("uvmalloc: sync fail");
       return 0;
-    } */
+    }
   }
   return newsz;
 }
