@@ -37,13 +37,14 @@ exec(char *path, char **argv)
   if(elf.magic != ELF_MAGIC)
     goto bad;
 
+  //printf("*bksize: %x. running %s\n", ksize(), path);
   if((pagetable = proc_pagetable(p)) == 0 || (kpagetable = kvminit_new()) == 0)
     goto bad;
+  //printf("aksize: %x\n", ksize());
 
   // Map kstack to kpgtable
   kstackPA = walkaddr4k(p->kernel_pagetable, p->kstack);
   kvmmap_new(kpagetable, p->kstack, kstackPA, PGSIZE, PTE_R | PTE_W);
-  //only for test
   //printf("\t#%d: ktack va:%p, pa:%p new kpgtable\n", p->pid, p->kstack, kstackPA);
 
   // Load program into memory.

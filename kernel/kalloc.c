@@ -84,6 +84,8 @@ kalloc(void)
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
+/*   else
+    printf("kalloc: mem run out\n"); */
   return (void*)r;
 }
 int

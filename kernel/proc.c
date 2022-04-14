@@ -149,7 +149,7 @@ found:
   uint64 va = KSTACK((int)(p - proc));
   kvmmap_new(p->kernel_pagetable,va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
   p->kstack = va;
-  
+
   //printf("\t#%d: ktack va:%p, pa:%p\n", p->pid, p->kstack, pa);
   //printf("\t#%d alloc kpt:%p,upt:%p\n",p->pid,p->kernel_pagetable,p->pagetable);
   
@@ -236,6 +236,7 @@ void proc_freepagetable(pagetable_t pagetable, uint64 sz)
 }
 // Free kernel_pgtable but not free physical memory it refers to
 // Free kstack if kstack != 0
+// No need to uvmunmap because we only free pagetable here.
 void proc_freeOnlyPagetable(pagetable_t pagetable,uint64 kstack)
 {
   if( kstack != 0)
@@ -297,7 +298,7 @@ int growproc(int n)
   }
   else if (n < 0)
   {
-    sz = uvmdealloc(p->pagetable, sz, sz + n);
+    sz = uvmdealloc(p->pagetable, p->kernel_pagetable, sz, sz + n);
   }
   p->sz = sz;
   return 0;

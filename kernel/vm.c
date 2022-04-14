@@ -60,26 +60,29 @@ kvminit_new()
   memset(kernel_pagetable, 0, PGSIZE);
 
   // uart registers
-  kvmmap_new(kernel_pagetable,UART0, UART0, PGSIZE, PTE_R | PTE_W);
+  if( kvmmap_new(kernel_pagetable,UART0, UART0, PGSIZE, PTE_R | PTE_W) < 0 ||
 
   /*// CLINT
   kvmmap_new(kernel_pagetable,CLINT, CLINT, 0x10000, PTE_R | PTE_W); */
 
   // virtio mmio disk interface
-  kvmmap_new(kernel_pagetable,VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+  kvmmap_new(kernel_pagetable,VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W) < 0 ||
 
   // PLIC
-  kvmmap_new(kernel_pagetable,PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+  kvmmap_new(kernel_pagetable,PLIC, PLIC, 0x400000, PTE_R | PTE_W) < 0 ||
 
   // map kernel text executable and read-only.
-  kvmmap_new(kernel_pagetable,KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
+  kvmmap_new(kernel_pagetable,KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X) < 0 ||
 
   // map kernel data and the physical RAM we'll make use of.
-  kvmmap_new(kernel_pagetable,(uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
+  kvmmap_new(kernel_pagetable,(uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W) < 0 ||
 
   // map the trampoline for trap entry/exit to
   // the highest virtual address in the kernel.
-  kvmmap_new(kernel_pagetable,TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+  kvmmap_new(kernel_pagetable,TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X) < 0 ){
+    proc_freeOnlyPagetable(kernel_pagetable, 0);
+    return 0;
+  }
   return kernel_pagetable;
 }
 
@@ -179,11 +182,12 @@ kvmmap(uint64 va, uint64 pa, uint64 sz, int perm)
   if(mappages(kernel_pagetable, va, sz, pa, perm) != 0)
     panic("kvmmap");
 }
-void
+int
 kvmmap_new(pagetable_t kernel_pagetable,uint64 va, uint64 pa, uint64 sz, int perm)
 {
   if(mappages(kernel_pagetable, va, sz, pa, perm) != 0)
-    panic("kvmmap_new");
+    return -1;
+  return 0;
 }
 
 // translate a kernel virtual address to
@@ -287,7 +291,7 @@ uvminit(pagetable_t pagetable, pagetable_t k_pagetable,uchar *src, uint sz)
   memset(mem, 0, PGSIZE);
   mappages(pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X|PTE_U);
   // exec() will create new pagetable, so this map is going to drop.
-  //mappages(k_pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X);
+  mappages(k_pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X);
   memmove(mem, src, sz);
 }
 
@@ -307,20 +311,21 @@ uvmalloc(pagetable_t pagetable, pagetable_t kernel_pgtable, uint64 oldsz, uint64
   for(a = oldsz; a < newsz; a += PGSIZE){
     mem = kalloc();
     if(mem == 0){
-      uvmdealloc(pagetable, a, oldsz);
+      uvmdealloc(pagetable, kernel_pgtable, a, oldsz);
       return 0;
     }
     memset(mem, 0, PGSIZE);
     if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
       kfree(mem);
-      uvmdealloc(pagetable, a, oldsz);
+      uvmdealloc(pagetable, kernel_pgtable, a, oldsz);
       return 0;
     }
     // sync upagetable and kpagetable
     if(a > PLIC) panic("uvmalloc: va larger than PLIC");
+    //printf("uvmalloc: map once\n");
     if(mappages(kernel_pgtable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R) != 0){
-      uvmdealloc(kernel_pgtable, a, oldsz);
-      panic("uvmalloc: sync fail");
+      uvmdealloc(pagetable, kernel_pgtable, a, oldsz);
+      printf("uvmalloc: sync fail\n");
       return 0;
     }
   }
@@ -332,7 +337,7 @@ uvmalloc(pagetable_t pagetable, pagetable_t kernel_pgtable, uint64 oldsz, uint64
 // need to be less than oldsz.  oldsz can be larger than the actual
 // process size.  Returns the new process size.
 uint64
-uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+uvmdealloc(pagetable_t pagetable, pagetable_t kpagetable, uint64 oldsz, uint64 newsz)
 {
   if(newsz >= oldsz)
     return oldsz;
@@ -340,6 +345,7 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
   if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
     int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
     uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
+    uvmunmap(kpagetable, PGROUNDUP(newsz), npages, 0);
   }
 
   return newsz;
@@ -441,7 +447,7 @@ uvmsynckvm(pagetable_t upagetable, pagetable_t kpagetable, uint64 sz)
   if( sz >= PLIC ){
     panic("uvmsynckvm: va is larger than PLIC");
   }
-
+  //printf("uvmsynckvm: map once\n");
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(upagetable, i, 0)) == 0)
       panic("uvmsynckvm: pte should exist");
@@ -505,7 +511,7 @@ copyin_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len);
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
-  uint64 n, va0, pa0;
+/*   uint64 n, va0, pa0;
 
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
@@ -521,9 +527,9 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     len -= n;
     dst += n;
     srcva = va0 + PGSIZE;
-  }
-  //return copyin_new(pagetable,dst, srcva,len);
-  return 0;
+  } */
+  return copyin_new(pagetable,dst, srcva,len);
+  /* return 0; */
 }
 
 // Copy a null-terminated string from user to kernel.
@@ -531,9 +537,12 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 // until a '\0', or max.
 // Return 0 on success, -1 on error.
 int
+copyinstr_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max);
+int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
-  uint64 n, va0, pa0;
+  return copyinstr_new(pagetable, dst, srcva, max);
+/*   uint64 n, va0, pa0;
   int got_null = 0;
 
   while(got_null == 0 && max > 0){
@@ -566,7 +575,7 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return 0;
   } else {
     return -1;
-  }
+  } */
 }
 
 int 

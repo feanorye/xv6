@@ -2513,7 +2513,7 @@ execout(char *s)
       // progress.
       for(int i = 0; i < avail; i++)
         sbrk(-4096);
-      
+      // close output stream? why?
       close(1);
       char *args[] = { "echo", "x", 0 };
       exec("echo", args);
@@ -2622,6 +2622,9 @@ main(int argc, char *argv[])
 {
   int continuous = 0;
   char *justone = 0;
+  // usertests testname #only testname
+  // usertests -c # continue test to fail
+  // usertests -C # continue test from start when fail
 
   if(argc == 2 && strcmp(argv[1], "-c") == 0){
     continuous = 1;
@@ -2707,6 +2710,9 @@ main(int argc, char *argv[])
           fail = 1;
           break;
         }
+        int free1 = countfree();
+        if(free1 < free0)
+          printf("ERROR: -- lost %d free pages\n", free0 - free1);
       }
       if(fail){
         printf("SOME TESTS FAILED\n");
