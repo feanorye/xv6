@@ -21,6 +21,7 @@ void slow_handler();
 int
 main(int argc, char *argv[])
 {
+  printf("func addr %p\n", periodic);
   test0();
   test1();
   test2();
@@ -54,7 +55,7 @@ test0()
   }
   sigalarm(0, 0);
   if(count > 0){
-    printf("test0 passed\n");
+    printf("\ntest0 passed\n");
   } else {
     printf("\ntest0 failed: the kernel never called the alarm handler\n");
   }
@@ -65,6 +66,9 @@ void __attribute__ ((noinline)) foo(int i, int *j) {
     write(2, ".", 1);
   }
   *j += 1;
+  if(i != *j-1){
+    printf("[inside]: i = %d j = %d\n", i, *j-1);
+  }
 }
 
 //
@@ -89,6 +93,10 @@ test1()
     if(count >= 10)
       break;
     foo(i, &j);
+    if( i != j-1){
+      printf("[outside] i = %d, j-1 = %d\n ", i , j-1);
+      exit(0);
+    }
   }
   if(count < 10){
     printf("\ntest1 failed: too few calls to the handler\n");
@@ -100,6 +108,7 @@ test1()
     // occurred; another is that that registers may not be
     // restored correctly, causing i or j or the address ofj
     // to get an incorrect value.
+    printf("%d != %d\n", i , j);
     printf("\ntest1 failed: foo() executed fewer times than it was called\n");
   } else {
     printf("test1 passed\n");

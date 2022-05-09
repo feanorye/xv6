@@ -29,6 +29,14 @@ trapinithart(void)
   w_stvec((uint64)kernelvec);
 }
 
+void
+copy_trapframe(struct trapframe *old, struct trapframe *new){
+  uint64 *p1 = &old->kernel_satp;
+  uint64 *p2 = &new->kernel_satp;
+  for(int i = 0;i <= 35; ++i, ++p1, ++p2){
+    *p2 = *p1;
+  }
+}
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
@@ -77,8 +85,26 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2){
     yield();
+    if(p->interval != 0){
+      acquire(&p->lock);
+
+      p->usedtick--;
+      if(p->usedtick == 0){
+        p->usedtick = p->interval;
+        p->storedval++;
+      }
+      if(p->storedval > 0 && p->is_finish){
+          copy_trapframe(p->trapframe, p->new_trapframe);
+          p->trapframe->epc = (uint64)p->handler;
+          p->is_finish = 0;
+          p->storedval--;
+          printf("|_enter handler %d left, saved epc %p ", p->storedval, p->new_trapframe->epc);
+      }
+      release(&p->lock);
+    }
+  }
 
   usertrapret();
 }

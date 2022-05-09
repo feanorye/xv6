@@ -1,11 +1,11 @@
 #include "types.h"
 #include "riscv.h"
-#include "defs.h"
 #include "date.h"
 #include "param.h"
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "defs.h"
 
 uint64
 sys_exit(void)
@@ -94,4 +94,40 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+uint64
+sys_sigalarm(void)
+{
+  int interval;
+  uint64 addr; 
+  struct proc *p = myproc();
+  // need to check: is a1 contains addr?
+  if(argint(0, &interval) < 0 || argaddr(1, &addr) < 0)
+    return -1;
+  
+  acquire(&p->lock);
+  if( interval == 0){
+    p->interval = 0;
+    p->usedtick = 0;
+    p->handler = 0;
+  }else{
+    p->interval = interval;
+    p->usedtick = interval;
+    p->handler = (void (*)())addr;
+    p->storedval = 0;
+    p->is_finish = 1;
+  }
+  release(&p->lock);
+  return 0;
+}
+
+uint64
+sys_sigreturn(void)
+{
+  struct proc *p = myproc();
+  copy_trapframe(p->new_trapframe, p->trapframe);
+  p->is_finish = 1;
+  printf("|_leaving hander, recover %p\n", p->trapframe->epc);
+  return 0;
 }
