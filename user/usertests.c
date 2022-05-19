@@ -2447,7 +2447,7 @@ sbrkbugs(char *s)
     exit(0);
   }
   wait(0);
-
+  printf("1st sbrk bug\n");
   pid = fork();
   if(pid < 0){
     printf("fork failed\n");
@@ -2462,6 +2462,7 @@ sbrkbugs(char *s)
     exit(0);
   }
   wait(0);
+  printf("2nd sbrk bug\n");
 
   pid = fork();
   if(pid < 0){
@@ -2480,6 +2481,7 @@ sbrkbugs(char *s)
     exit(0);
   }
   wait(0);
+  printf("3rd sbrk bug\n");
 
   exit(0);
 }
@@ -2750,14 +2752,18 @@ main(int argc, char *argv[])
     while(1){
       int fail = 0;
       int free0 = countfree();
+      int free2 = free0;
       for (struct test *t = tests; t->s != 0; t++) {
         if(!run(t->f, t->s)){
-          fail = 1;
+          fail += 1;
           break;
         }
+        free2 = countfree();
+        if(free2 < free0)
+          printf("FAILED -- lost %d free pages\n", free0 - free2);
       }
       if(fail){
-        printf("SOME TESTS FAILED\n");
+        printf("%d TESTS FAILED\n", fail);
         if(continuous != 2)
           exit(1);
       }
