@@ -103,9 +103,9 @@ walkaddr(pagetable_t pagetable, uint64 va)
     return 0;
 
   pte = walk(pagetable, va, 0);
-/*   if((pte == 0 || *pte == 0) && lazy_uvmalloc(myproc(), va ) == 0){
+  if((pte == 0 || *pte == 0) && lazy_uvmalloc(myproc(), va ) == 0){
     pte = walk(pagetable, va, 0);
-  } */
+  }
   if(pte == 0)
     return 0;
   if((*pte & PTE_V) == 0)
@@ -264,10 +264,12 @@ lazy_uvmalloc(struct proc *p, uint64 va)
       va = PGROUNDDOWN(va);
       uint64 stackbase = p->trapframe->sp;
       uint64 guardpage = PGROUNDDOWN(stackbase) - PGSIZE;
-      char *mem = kalloc();
-      if( va >= p->sz || va == guardpage || mem == 0 ){
+      if( va >= p->sz || va == guardpage ){
         return 1;
       }
+      char *mem = kalloc();
+      if(mem == 0)
+        return 1;
       memset(mem, 0, PGSIZE);
       // all permission is gived
       if(mappages(p->pagetable, va, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_U) != 0){
