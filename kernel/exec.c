@@ -22,7 +22,7 @@ exec(char *path, char **argv)
   struct proc *p = myproc();
 
   begin_op();
-
+  printf("[exec]%s\n", path);
   if((ip = namei(path)) == 0){
     end_op();
     return -1;

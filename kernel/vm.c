@@ -5,11 +5,15 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
  */
 pagetable_t kernel_pagetable;
+
+extern int ref[(PHYSTOP -KERNBASE)/PGSIZE]; //kalloc.c
 
 extern char etext[];  // kernel.ld sets this to end of kernel code.
 
@@ -156,7 +160,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   for(;;){
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
-    if(*pte & PTE_V)
+    if((*pte & PTE_V) && !(*pte & PTE_RSW))
       panic("remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)
@@ -311,7 +315,6 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -319,20 +322,58 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
+    *pte &= ~PTE_W; //set parent mem as no-write page
+    *pte |= PTE_RSW; //set parent mem as COW page
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
+/*     if((mem = kalloc()) == 0)
       goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    memmove(mem, (char*)pa, PGSIZE); */
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
+      //kfree(mem);
       goto err;
     }
+    ref[((long int)pa - KERNBASE)/PGSIZE] += 1;
   }
   return 0;
 
  err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
+  uvmunmap(new, 0, i / PGSIZE, 0);
   return -1;
+}
+
+// page fault handler
+// @return: -1: kill process
+//           0: success
+int
+pgfault_uvmalloc(struct proc *p, uint64 va){
+  pte_t *pte;
+  uint64 pa, flag;
+  char *mem;
+  va = PGROUNDDOWN(va);
+
+  uint64 stackbase = p->trapframe->sp;
+  uint64 guardpage = PGROUNDDOWN(stackbase) - PGSIZE;
+  if( va >= p->sz || va == guardpage ){
+    return -1;
+  }
+
+  if((pte = walk(p->pagetable, va, 0)) == 0)
+    panic("pgfault_handler: pte should exist");
+  if((*pte & PTE_V) == 0)
+    panic("pgfault_handler: page not present");
+  pa = PTE2PA(*pte);
+  if((mem = kalloc())== 0)
+    return -1;
+  memmove(mem, (char*)pa, PGSIZE);
+  // all permission is given
+  flag = PTE_FLAGS(*pte);
+  flag &= ~PTE_RSW;
+  if(mappages(p->pagetable, va, PGSIZE, (uint64)mem, flag | PTE_W) != 0){
+    kfree(mem);
+    return -1;
+  }
+  kfree((void *)pa);
+  return 0;
 }
 
 // mark a PTE invalid for user access.
@@ -355,9 +396,23 @@ int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
-
+  pte_t *pte;
+  
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+    pte = walk(pagetable, va0, 0);
+    if(pte == 0){
+      panic("copyout: pte == 0");
+    }
+    if((*pte & PTE_V) == 0)
+      panic("copyout: pte not valid");
+    if((*pte & PTE_U) == 0)
+      panic("copyout: pte not user");
+
+    if((*pte & PTE_RSW))
+      if(pgfault_uvmalloc(myproc(), va0) == -1)
+        return -1;
+
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;

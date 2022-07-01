@@ -68,9 +68,13 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
-    printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
-    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
-    p->killed = 1;
+    if(r_scause() == 12 || r_scause() == 13 || r_scause() == 15){ //page fault
+      uint64 va = r_stval();
+      printf("*cause%d:%p\n",r_scause(), va);
+      p->killed = pgfault_uvmalloc(p, va);
+    }else{
+      p->killed = 1;
+    }
   }
 
   if(p->killed)
