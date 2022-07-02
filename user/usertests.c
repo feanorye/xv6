@@ -2682,7 +2682,7 @@ main(int argc, char *argv[])
     void (*f)(char *);
     char *s;
   } tests[] = {
-    //{execout, "execout"},
+    {execout, "execout"},
     {copyin, "copyin"},
     {copyout, "copyout"},
     {copyinstr1, "copyinstr1"},
@@ -2775,12 +2775,12 @@ main(int argc, char *argv[])
   for (struct test *t = tests; t->s != 0; t++) {
     if((justone == 0) || strcmp(t->s, justone) == 0) {
       if(!run(t->f, t->s))
-        fail = 1;
+        fail += 1;
     }
   }
 
   if(fail){
-    printf("SOME TESTS FAILED\n");
+    printf("%d TESTS FAILED\n",fail);
     exit(1);
   } else if((free1 = countfree()) < free0){
     printf("FAILED -- lost some free pages %d (out of %d)\n", free1, free0);
