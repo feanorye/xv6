@@ -401,14 +401,8 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
     pte = walk(pagetable, va0, 0);
-    if(pte == 0){
-      panic("copyout: pte == 0");
-    }
-    if((*pte & PTE_V) == 0)
-      panic("copyout: pte not valid");
-    if((*pte & PTE_U) == 0)
-      panic("copyout: pte not user");
-
+    if(pte == 0)
+      return -1;
     if((*pte & PTE_RSW))
       if(pgfault_uvmalloc(myproc(), va0) == -1)
         return -1;
