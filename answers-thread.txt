@@ -1,0 +1,12 @@
+e.g
+	haed
+	|
+	|
+	a->b->c
+when thread1 insert new 'd': 
+	d->next = a
+	head = d;
+at same time thread2 inseart new 'e':
+	e->next = a;
+	head = e;
+which will result in missing 'd'.			
