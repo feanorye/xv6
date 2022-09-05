@@ -8,7 +8,7 @@
 // Interface:
 // * To get a buffer for a particular disk block, call bread.
 // * After changing buffer data, call bwrite to write it to disk.
-// * When done with the buffer, call brelse.
+// * When done with the buffer, call brelease.
 // * Do not use the buffer after calling brelse.
 // * Only one process at a time can use a buffer,
 //     so do not keep them longer than necessary.
@@ -44,10 +44,10 @@ binit(void)
   bcache.head.prev = &bcache.head;
   bcache.head.next = &bcache.head;
   for(b = bcache.buf; b < bcache.buf+NBUF; b++){
-    b->next = bcache.head.next;
+    b->next = bcache.head.next; // new data->next point to 2nd new data;
     b->prev = &bcache.head;
     initsleeplock(&b->lock, "buffer");
-    bcache.head.next->prev = b;
+    bcache.head.next->prev = b; // 2nd new data.prev point to newest data
     bcache.head.next = b;
   }
 }

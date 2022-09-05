@@ -15,18 +15,22 @@ extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
 
 struct run {
-  struct run *next;
+  struct run *next; // equal to TreeNode without val
 };
 
 struct {
   struct spinlock lock;
   struct run *freelist;
-} kmem;
+  int count;
+} kmem[NCPU];
 
 void
 kinit()
 {
-  initlock(&kmem.lock, "kmem");
+  for(int i = 0; i < NCPU; i++){
+    initlock(&kmem[i].lock, "kmem");
+    kmem[i].count = 0;
+  }
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -35,6 +39,7 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
+  printf("#cpu %d freerange\n",cpuid());
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
     kfree(p);
 }
@@ -55,11 +60,16 @@ kfree(void *pa)
   memset(pa, 1, PGSIZE);
 
   r = (struct run*)pa;
+  push_off();//turn off interrupt
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+  int id = cpuid();
+  acquire(&kmem[id].lock);
+  r->next = kmem[id].freelist;
+  kmem[id].freelist = r;
+  kmem[id].count++;
+  release(&kmem[id].lock);
+
+  pop_off();//restore interrupt
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -70,13 +80,61 @@ kalloc(void)
 {
   struct run *r;
 
-  acquire(&kmem.lock);
-  r = kmem.freelist;
-  if(r)
-    kmem.freelist = r->next;
-  release(&kmem.lock);
+  push_off();//turn off interrupt
+  int id = cpuid();
+  acquire(&kmem[id].lock);
+  r = kmem[id].freelist;
+  if(r){
+    kmem[id].freelist = r->next;
+    kmem[id].count--;
+  }else{
+    for(int i = 0; i < NCPU; i++){
+      if(i==id) continue;
+      acquire(&kmem[i].lock);
+      // fail1: when kmem[i].minCount != cur_count
+      //        e.g) set para to [5, 1/10 * minCount]
+      //             if minCount == 0, then cur_count == 0
+      //             which would cause sbrk stop.
+      if(kmem[i].count > 0){
+        int cur_count = kmem[i].count;
+        cur_count = cur_count / 5 + 1;
+        for(int j = 0; j < cur_count; j++){
+          // Remove kmem[i] cur_count mem. 
+          r = kmem[i].freelist;
+          kmem[i].freelist = r->next;
+          // Add mem to kmem[id]
+          r->next = kmem[id].freelist;
+          kmem[id].freelist = r;
+        }
+        // Fix kmem count
+        kmem[i].count = kmem[i].count - cur_count;
+        kmem[id].count = cur_count;
+        // Need release kmem[i]
+        release(&kmem[i].lock);
+        //debug: disp_mem
+        //disp_mem(id, i, cur_count);
+        break;
+      }
+      release(&kmem[i].lock);
+    }
+    r = kmem[id].freelist;
+    if(r){
+      kmem[id].freelist = r->next;
+      kmem[id].count--;
+    }
+  }
+  release(&kmem[id].lock);
+
+  pop_off();
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+void
+disp_mem(int id, int bid, int mem){
+  printf("CPU#%d <- CPU#%d: %d\n", id, bid, mem);
+  for(int i = 0; i < NCPU; i++){
+    printf("CPU#%d: mem: %d\n", i, kmem[i].count);
+  }
 }

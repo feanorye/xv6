@@ -626,7 +626,7 @@ kill(int pid)
       p->killed = 1;
       if(p->state == SLEEPING){
         // Wake process from sleep().
-        p->state = RUNNABLE;
+      p->state = RUNNABLE;
       }
       release(&p->lock);
       return 0;
