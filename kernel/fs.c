@@ -420,6 +420,7 @@ itrunc(struct inode *ip)
     }
   }
 
+  // 类似深度优先，但因为只有两层，故直接写出
   if(ip->addrs[NDIRECT]){
     bp = bread(ip->dev, ip->addrs[NDIRECT]);
     a = (uint*)bp->data;
@@ -452,14 +453,16 @@ stati(struct inode *ip, struct stat *st)
 // Caller must hold ip->lock.
 // If user_dst==1, then dst is a user virtual address;
 // otherwise, dst is a kernel address.
+// @param off: byte偏移量
 int
 readi(struct inode *ip, int user_dst, uint64 dst, uint off, uint n)
 {
   uint tot, m;
   struct buf *bp;
-
+  // 如果起始位置超过文件大小，或者读取数量为负 
   if(off > ip->size || off + n < off)
     return 0;
+  // 如果超过文件大小，修改为文件末尾
   if(off + n > ip->size)
     n = ip->size - off;
 
