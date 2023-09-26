@@ -18,6 +18,7 @@ struct run {
   struct run *next; // equal to TreeNode without val
 };
 
+// freelist-> r1 -> r2 -> ...
 struct {
   struct spinlock lock;
   struct run *freelist;
@@ -84,44 +85,44 @@ kalloc(void)
   int id = cpuid();
   acquire(&kmem[id].lock);
   r = kmem[id].freelist;
-  if(r){
-    kmem[id].freelist = r->next;
-    kmem[id].count--;
-  }else{
-    for(int i = 0; i < NCPU; i++){
-      if(i==id) continue;
+  if (!r) {
+    for (int i = 0; i < NCPU; i++) {
+      if (i == id)
+        continue;
       acquire(&kmem[i].lock);
       // fail1: when kmem[i].minCount != cur_count
       //        e.g) set para to [5, 1/10 * minCount]
       //             if minCount == 0, then cur_count == 0
       //             which would cause sbrk stop.
-      if(kmem[i].count > 0){
-        int cur_count = kmem[i].count;
-        cur_count = cur_count / 5 + 1;
-        for(int j = 0; j < cur_count; j++){
-          // Remove kmem[i] cur_count mem. 
-          r = kmem[i].freelist;
-          kmem[i].freelist = r->next;
-          // Add mem to kmem[id]
-          r->next = kmem[id].freelist;
-          kmem[id].freelist = r;
+      if (kmem[i].count > 0) {
+        // Add mem to kmem[id]
+        kmem[id].freelist = kmem[i].freelist;
+
+        int mv_cnt = kmem[i].count / 5 + 1;
+        struct run *prev = 0;
+        // Remove kmem[i] cur_count mem.
+        for (int j = 0; j < mv_cnt; j++) {
+          prev = kmem[i].freelist; // prev -> mv kmem[] tail
+          kmem[i].freelist = prev->next;
         }
+        // remove list connection
+        prev->next = 0;
         // Fix kmem count
-        kmem[i].count = kmem[i].count - cur_count;
-        kmem[id].count = cur_count;
+        kmem[i].count = kmem[i].count - mv_cnt;
+        kmem[id].count = mv_cnt;
         // Need release kmem[i]
         release(&kmem[i].lock);
-        //debug: disp_mem
-        //disp_mem(id, i, cur_count);
+        // debug: disp_mem
+        // disp_mem(id, i, cur_count);
         break;
       }
       release(&kmem[i].lock);
     }
     r = kmem[id].freelist;
-    if(r){
-      kmem[id].freelist = r->next;
-      kmem[id].count--;
-    }
+  }
+  if (r) {
+    kmem[id].freelist = r->next;
+    kmem[id].count--;
   }
   release(&kmem[id].lock);
 
@@ -131,6 +132,7 @@ kalloc(void)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
 }
+
 void
 disp_mem(int id, int bid, int mem){
   printf("CPU#%d <- CPU#%d: %d\n", id, bid, mem);
