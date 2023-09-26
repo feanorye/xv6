@@ -23,7 +23,7 @@ struct file {
 // in-memory copy of an inode
 struct inode {
   uint dev;           // Device number
-  uint inum;          // Inode number
+  uint inum;          // Inode number, root inode is 1
   int ref;            // Reference count by fileDescriptor or dir
   struct sleeplock lock; // protects everything below here
   int valid;          // inode has been read from disk?

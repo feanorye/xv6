@@ -236,9 +236,12 @@ iupdate(struct inode *ip)
   brelse(bp);
 }
 
-// Find the inode with number inum on device dev
-// and return the in-memory copy. Does not lock
-// the inode and does not read it from disk.
+/**
+ * @brief Find the inode with number inum on device dev
+ * and return the in-memory copy. Does not lock
+ * the inode and does not read it from disk.
+ * @return inode with incremented ref cnt
+ */
 static struct inode*
 iget(uint dev, uint inum)
 {
@@ -448,12 +451,14 @@ stati(struct inode *ip, struct stat *st)
   st->nlink = ip->nlink;
   st->size = ip->size;
 }
-
-// Read data from inode.
-// Caller must hold ip->lock.
-// If user_dst==1, then dst is a user virtual address;
-// otherwise, dst is a kernel address.
-// @param off: byte偏移量
+/**
+ * @brief Read data from inode corresponding block content.
+ * Caller must hold ip->lock.
+ * If user_dst==1, then dst is a user virtual address;
+ * otherwise, dst is a kernel address.
+ * @param off: byte offset, so we could cast data to dir type or byte stream.
+ * @return total read bytes, -1 if error.
+ */
 int
 readi(struct inode *ip, int user_dst, uint64 dst, uint off, uint n)
 {
@@ -468,6 +473,7 @@ readi(struct inode *ip, int user_dst, uint64 dst, uint off, uint n)
 
   for(tot=0; tot<n; tot+=m, off+=m, dst+=m){
     bp = bread(ip->dev, bmap(ip, off/BSIZE));
+    // 剩余读取需求，从起始位置读取的有效大小
     m = min(n - tot, BSIZE - off%BSIZE);
     if(either_copyout(user_dst, dst, bp->data + (off % BSIZE), m) == -1) {
       brelse(bp);
@@ -479,7 +485,7 @@ readi(struct inode *ip, int user_dst, uint64 dst, uint off, uint n)
   return tot;
 }
 
-// Write data to inode.
+// Write data to inode corresponding content block.
 // Caller must hold ip->lock.
 // If user_src==1, then src is a user virtual address;
 // otherwise, src is a kernel address.
@@ -526,8 +532,14 @@ namecmp(const char *s, const char *t)
   return strncmp(s, t, DIRSIZ);
 }
 
-// Look for a directory entry in a directory.
-// If found, set *poff to byte offset of entry.
+/**
+ * @brief Look for a directory entry in a directory.
+ * If found, set *poff to byte offset of entry.
+ * @param name[in]
+ * @param dp[in] current dir entry's inode
+ * @param poff[out] offset of found dentry in dp's content
+ * @return unlocked inode with ref inc, nullptr if no entry found.
+ */
 struct inode*
 dirlookup(struct inode *dp, char *name, uint *poff)
 {
@@ -547,6 +559,7 @@ dirlookup(struct inode *dp, char *name, uint *poff)
       if(poff)
         *poff = off;
       inum = de.inum;
+      // if look for . and lock inode, it would lock it twice.
       return iget(dp->dev, inum);
     }
   }
@@ -585,19 +598,21 @@ dirlink(struct inode *dp, char *name, uint inum)
 }
 
 // Paths
-
-// Copy the next path element from path into name.
-// Return a pointer to the element following the copied one.
-// The returned path has no leading slashes,
-// so the caller can check *path=='\0' to see if the name is the last one.
-// If no name to remove, return 0.
-//
-// Examples:
-//   skipelem("a/bb/c", name) = "bb/c", setting name = "a"
-//   skipelem("///a//bb", name) = "bb", setting name = "a"
-//   skipelem("a", name) = "", setting name = "a"
-//   skipelem("", name) = skipelem("////", name) = 0
-//
+/**
+ * Copy the next path element from path into name.
+ * Return a pointer to the element following the copied one.
+ * The returned path has no leading slashes,
+ * so the caller can check *path=='\0' to see if the name is the last one.
+ * @param name[out]: next path name
+ * @return Start pointer of next path. If no name to remove, return 0.
+ *
+ * Examples:
+ *   skipelem("a/bb/c", name) = "bb/c", setting name = "a"
+ *   skipelem("///a//bb", name) = "bb", setting name = "a"
+ *   skipelem("a", name) = "", setting name = "a"
+ *   skipelem("", name) = skipelem("////", name) = 0
+ *
+*/
 static char*
 skipelem(char *path, char *name)
 {
@@ -623,10 +638,14 @@ skipelem(char *path, char *name)
   return path;
 }
 
-// Look up and return the inode for a path name.
-// If parent != 0, return the inode for the parent and copy the final
-// path element into name, which must have room for DIRSIZ bytes.
-// Must be called inside a transaction since it calls iput().
+/**
+ * Look up and return the inode for a path name.
+ * Must be called inside a transaction since it calls iput().
+ * @param path[in]
+ * @param name[out] If parent != 0, return the inode for the parent and copy the final
+ *  path element into name, which must have room for DIRSIZ bytes. otherwise is invalid.
+ * @return inode of path. 0 if not found.
+ */
 static struct inode*
 namex(char *path, int nameiparent, char *name)
 {
@@ -636,7 +655,9 @@ namex(char *path, int nameiparent, char *name)
     ip = iget(ROOTDEV, ROOTINO);
   else
     ip = idup(myproc()->cwd);
-
+  // todo: iget和ilock分离的好处怎么理解？97页需要重新理解 
+  // 树型结构：ip为当前节点，name是寻找的下层信息，ip->blocks中包含{name, inode_num}
+  // path表示下层name之后是否还存在路径
   while((path = skipelem(path, name)) != 0){
     ilock(ip);
     if(ip->type != T_DIR){
@@ -662,6 +683,9 @@ namex(char *path, int nameiparent, char *name)
   return ip;
 }
 
+/**
+ * @return inode of path, 0 if path not found.
+ */
 struct inode*
 namei(char *path)
 {

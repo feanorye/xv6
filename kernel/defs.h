@@ -53,7 +53,7 @@ void            iupdate(struct inode*);
 int             namecmp(const char*, const char*);
 struct inode*   namei(char*);
 struct inode*   nameiparent(char*, char*);
-int             readi(struct inode*, int, uint64, uint, uint);
+int             readi(struct inode *ip, int user_dst, uint64 dst, uint off, uint n);
 void            stati(struct inode*, struct stat*);
 int             writei(struct inode*, int, uint64, uint, uint);
 void            itrunc(struct inode*);
