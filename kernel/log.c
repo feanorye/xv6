@@ -33,7 +33,7 @@
 // Contents of the header block, used for both the on-disk header block
 // and to keep track in memory of logged block# before commit.
 struct logheader {
-  int n;
+  int n; // how many block is loggingd
   int block[LOGSIZE];
 };
 
@@ -109,6 +109,7 @@ write_head(void)
   for (i = 0; i < log.lh.n; i++) {
     hb->block[i] = log.lh.block[i];
   }
+  // 只有单个事务，且一个header只包含一个block，所以commit all or nothing
   bwrite(buf);
   brelse(buf);
 }
@@ -227,6 +228,7 @@ log_write(struct buf *b)
       break;
   }
   log.lh.block[i] = b->blockno;
+  // 所有log的block都会pin
   if (i == log.lh.n) {  // Add new block to log?
     bpin(b);
     log.lh.n++;

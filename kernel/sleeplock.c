@@ -21,7 +21,7 @@ initsleeplock(struct sleeplock *lk, char *name)
 void
 acquiresleep(struct sleeplock *lk)
 {
-  acquire(&lk->lk);
+  acquire(&lk->lk); // sleepLock.(spinLock)lk保证sleepLock的唯一访问
   while (lk->locked) {
     sleep(lk, &lk->lk);
   }
