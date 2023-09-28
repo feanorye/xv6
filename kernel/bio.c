@@ -23,16 +23,15 @@
 #include "fs.h"
 #include "buf.h"
 
+struct bucket{
+  struct spinlock latch_;
+  struct buf head_;
+  int free_num_;
+};
 struct {
   struct spinlock lock;
   struct buf buf[NBUF];
-
-  // Linked list of all buffers, through prev/next.
-  // Sorted by how recently the buffer was used.
-  // head.next is most recent, head.prev is least.
-  struct buf freelist;
-  struct buf bucket[NBUCKET];
-  struct spinlock bk_lock[NBUCKET];
+  struct bucket bucket[NBUCKET];
 } bcache;
 
 void
@@ -42,64 +41,120 @@ binit(void)
 
   initlock(&bcache.lock, "bcache");
   for(int i = 0; i < NBUCKET; i++){
-    initlock(&(bcache.bk_lock[i]), "bcache.bucket");
-    bcache.bucket[i].next = &bcache.bucket[i];
-    bcache.bucket[i].prev = &bcache.bucket[i];
+    initlock(&(bcache.bucket[i].latch_), "bcache.bucket");
+    bcache.bucket[i].head_.next = &(bcache.bucket[i].head_);
+    bcache.bucket[i].head_.prev = &(bcache.bucket[i].head_);
+    bcache.bucket[i].free_num_ = 0;
+  }
+  // Create linked list of buffers
+  struct buf *head = &(bcache.bucket[0].head_);
+  for (b = bcache.buf; b < bcache.buf + NBUF; b++) {
+    b->prev = head;
+    b->next = head->next;
+    initsleeplock(&b->lock, "buffer");
+    head->next->prev = b;
+    head->next = b;
+  }
+  bcache.bucket[0].free_num_ = NBUF;
+}
+
+void
+bprint(int idx, char *prefix){
+  struct buf *head = &bcache.bucket[idx].head_;
+  printf("%s bucket: %d, freenum: %d: ", prefix, idx,
+         bcache.bucket[idx].free_num_);
+  int i = 0;
+  for (struct buf *b = head->next; b != head; b = b->next, i++) {
+    printf("(%d:%d),", i, b->refcnt);
+  }
+  printf("\n");
+}
+
+/**
+ * @brief steal evictble buf from other bucket.
+ * @param req_idx idx of request bucket idx. Caller should hold it's latch_
+ */
+static struct buf *
+stealbuf(int req_idx) {
+  // steal from other bucket. NOTE: deadlock may happen
+  // when bucket1 scan bucket3 for free, buket3 scan bucket1 for free buf.
+  release(&bcache.bucket[req_idx].latch_);
+  struct buf *eb = 0;
+
+  for (int i = 1, ei; i < NBUCKET; i++) {
+    ei = (req_idx + i) % NBUCKET;
+    acquire(&bcache.bucket[ei].latch_);
+    if (bcache.bucket[ei].free_num_ == 0) {
+      release(&bcache.bucket[ei].latch_);
+      continue;
+    }
+    if(bcache.bucket[ei].free_num_ < 0){
+      panic("ERROR: bucket free_num < 0\n");
+    }
+    for (struct buf *b = bcache.bucket[ei].head_.next;
+         b != &(bcache.bucket[ei].head_); b = b->next) {
+      if (b->refcnt == 0 && (eb == 0 || b->rtime < eb->rtime)) {
+        eb = b;
+      }
+    }
+    if(eb == 0){
+      bprint(ei, "panic");
+      panic("steal 0 buf\n");
+    }
+    bprint(ei, "#del");
+    eb->next->prev = eb->prev;
+    eb->prev->next = eb->next;
+    bcache.bucket[ei].free_num_--;
+    release(&bcache.bucket[ei].latch_);
+    break;
   }
 
-  bcache.freelist.next = &bcache.freelist;
-  bcache.freelist.prev = &bcache.freelist;
-  // Create linked list of buffers
-  for (b = bcache.buf; b < bcache.buf + NBUF; b++) {
-    b->prev = &(bcache.freelist);
-    b->next = bcache.freelist.next;
-    initsleeplock(&b->lock, "buffer");
-    b->next->prev = b;
-    bcache.freelist.next = b;
+  acquire(&bcache.bucket[req_idx].latch_);
+  if (eb != 0) {
+    eb->next = bcache.bucket[req_idx].head_.next;
+    eb->prev = &bcache.bucket[req_idx].head_;
+    bcache.bucket[req_idx].head_.next->prev = eb;
+    bcache.bucket[req_idx].head_.next = eb;
+    bcache.bucket[req_idx].free_num_++;
   }
+  bprint(req_idx, "#add");
+  return eb;
 }
 
 // 1. Look through buffer cache for block on device dev.
-// 2. If not found, allocate a buffer.
+// 2. If not found, allocate a lease used buffer from evictable buffers.
 // In either case, return locked buffer.
 static struct buf*
 bget(uint dev, uint blockno)
 {
-  struct buf *eblock;
+  struct buf *eb = 0;
   int bucketi = blockno % NBUCKET;
-  acquire(&bcache.bk_lock[bucketi]);
+  acquire(&bcache.bucket[bucketi].latch_);
 
   // Is the block already cached?
-  for(eblock = bcache.bucket[bucketi].next; eblock != &bcache.bucket[bucketi]; eblock = eblock->next){
-    if(eblock->dev == dev && eblock->blockno == blockno){
-      eblock->refcnt++;
+  for (struct buf *b = bcache.bucket[bucketi].head_.next;
+       b != &(bcache.bucket[bucketi].head_); b = b->next) {
+    if (b->dev == dev && b->blockno == blockno) {
+      b->refcnt++;
       // refcnt could ensure buf not reused
-      release(&bcache.bk_lock[bucketi]);
-      acquiresleep(&eblock->lock);
-      return eblock;
+      release(&bcache.bucket[bucketi].latch_);
+      acquiresleep(&b->lock);
+      return b;
+    }
+    if (b->refcnt == 0 && (eb == 0 || b->rtime < eb->rtime)) {
+      eb = b;
     }
   }
-  acquire(&bcache.lock);
-  eblock = bcache.freelist.next;
-  if (eblock != &bcache.freelist) {
-    eblock->next->prev = eblock->prev;
-    eblock->prev->next = eblock->next;
-  }
-  release(&bcache.lock);
 
-  if (eblock != &bcache.freelist) {
-    eblock->next = bcache.bucket[bucketi].next;
-    eblock->prev = &(bcache.bucket[bucketi]);
-
-    eblock->next->prev = eblock;
-    bcache.bucket[bucketi].next = eblock;
-    eblock->dev = dev;
-    eblock->blockno = blockno;
-    eblock->valid = 0;
-    eblock->refcnt = 1;
-    release(&bcache.bk_lock[bucketi]);
-    acquiresleep(&eblock->lock);
-    return eblock;
+  if (eb != 0 || (eb = stealbuf(bucketi)) != 0) {
+    eb->dev = dev;
+    eb->blockno = blockno;
+    eb->valid = 0;
+    eb->refcnt = 1;
+    bcache.bucket[bucketi].free_num_--;
+    release(&bcache.bucket[bucketi].latch_);
+    acquiresleep(&eb->lock);
+    return eb;
   }
   panic("bget: no buffers");
 }
@@ -137,42 +192,32 @@ brelse(struct buf *b)
   releasesleep(&b->lock);
 
   int bi = b->blockno % NBUCKET;
-  acquire(&bcache.bk_lock[bi]);
+  acquire(&bcache.bucket[bi].latch_);
   b->refcnt--;
-  if (b->refcnt > 0) {
-    // no one is waiting for it.
-    b->next->prev = b->prev;
-    b->prev->next = b->next;
-    b->next = bcache.bucket[bi].next;
-    b->prev = &bcache.bucket[bi];
-    bcache.bucket[bi].next->prev = b;
-    bcache.bucket[bi].next = b;
-  } else {
-    b->next->prev = b->prev;
-    b->prev->next = b->next;
-    acquire(&bcache.lock);
-    b->next = bcache.freelist.next;
-    b->prev = &(bcache.freelist);
-    bcache.freelist.next = b;
-    b->next->prev = b;
-    release(&bcache.lock);
+  // Only care rtime of evictable buffer
+  if (b->refcnt == 0) {
+    bcache.bucket[bi].free_num_++;
+    b->rtime = ticks;
+    bprint(bi, "#release ");
   }
-
-  release(&bcache.bk_lock[bi]);
+  release(&bcache.bucket[bi].latch_);
 }
 
+// todo: log为什么要pin? 什么情况下unpin?
 void
 bpin(struct buf *b) {
-  acquire(&bcache.lock);
+  int bi = b->blockno % NBUCKET;
+  acquire(&bcache.bucket[bi].latch_);
   b->refcnt++;
-  release(&bcache.lock);
+  release(&bcache.bucket[bi].latch_);
 }
 
 void
 bunpin(struct buf *b) {
-  acquire(&bcache.lock);
+  int bi = b->blockno % NBUCKET;
+  acquire(&bcache.bucket[bi].latch_);
   b->refcnt--;
-  release(&bcache.lock);
+  release(&bcache.bucket[bi].latch_);
 }
 
 
