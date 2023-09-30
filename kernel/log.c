@@ -39,7 +39,7 @@ struct logheader {
 
 struct log {
   struct spinlock lock;
-  int start;
+  int start; // log block first number, i.e header log block
   int size; // log blocks capacity
   int outstanding; // how many FS sys calls are executing.
   int committing;  // in commit(), please wait.
@@ -227,7 +227,8 @@ log_write(struct buf *b)
     if (log.lh.block[i] == b->blockno)   // log absorbtion
       break;
   }
-  log.lh.block[i] = b->blockno; // 记录修改的blockno
+  // 记录修改的blockno
+  log.lh.block[i] = b->blockno;
   // 所有log的block都会pin
   if (i == log.lh.n) {  // Add new block to log?
     bpin(b); // 保证写完data, brelease()之后，ref不为0

@@ -61,7 +61,7 @@ binit(void)
 void
 bprint(int idx, char *prefix){
   struct buf *head = &bcache.bucket[idx].head_;
-  printf("%s bucket: %d, freenum: %d: ", prefix, idx,
+  printf("%s bucket: %d, freenum: %d, ", prefix, idx,
          bcache.bucket[idx].free_num_);
   int i = 0;
   for (struct buf *b = head->next; b != head; b = b->next, i++) {
@@ -101,7 +101,7 @@ stealbuf(int req_idx) {
       bprint(ei, "panic");
       panic("steal 0 buf\n");
     }
-    bprint(ei, "#del");
+    // bprint(ei, "#before del");
     eb->next->prev = eb->prev;
     eb->prev->next = eb->next;
     bcache.bucket[ei].free_num_--;
@@ -117,7 +117,6 @@ stealbuf(int req_idx) {
     bcache.bucket[req_idx].head_.next = eb;
     bcache.bucket[req_idx].free_num_++;
   }
-  bprint(req_idx, "#add");
   return eb;
 }
 
@@ -128,16 +127,19 @@ static struct buf*
 bget(uint dev, uint blockno)
 {
   struct buf *eb = 0;
-  int bucketi = blockno % NBUCKET;
-  acquire(&bcache.bucket[bucketi].latch_);
+  int bi = blockno % NBUCKET;
+  acquire(&bcache.bucket[bi].latch_);
 
   // Is the block already cached?
-  for (struct buf *b = bcache.bucket[bucketi].head_.next;
-       b != &(bcache.bucket[bucketi].head_); b = b->next) {
+  for (struct buf *b = bcache.bucket[bi].head_.next;
+       b != &(bcache.bucket[bi].head_); b = b->next) {
     if (b->dev == dev && b->blockno == blockno) {
+      if(b->refcnt == 0){
+        bcache.bucket[bi].free_num_--;
+      }
       b->refcnt++;
       // refcnt could ensure buf not reused
-      release(&bcache.bucket[bucketi].latch_);
+      release(&bcache.bucket[bi].latch_);
       acquiresleep(&b->lock);
       return b;
     }
@@ -146,13 +148,14 @@ bget(uint dev, uint blockno)
     }
   }
 
-  if (eb != 0 || (eb = stealbuf(bucketi)) != 0) {
+  if (eb != 0 || (eb = stealbuf(bi)) != 0) {
     eb->dev = dev;
     eb->blockno = blockno;
     eb->valid = 0;
     eb->refcnt = 1;
-    bcache.bucket[bucketi].free_num_--;
-    release(&bcache.bucket[bucketi].latch_);
+    bcache.bucket[bi].free_num_--;
+    // bprint(bi, "#after add");
+    release(&bcache.bucket[bi].latch_);
     acquiresleep(&eb->lock);
     return eb;
   }
@@ -198,7 +201,7 @@ brelse(struct buf *b)
   if (b->refcnt == 0) {
     bcache.bucket[bi].free_num_++;
     b->rtime = ticks;
-    bprint(bi, "#release ");
+    // bprint(bi, "#after release ");
   }
   release(&bcache.bucket[bi].latch_);
 }
@@ -209,6 +212,7 @@ bpin(struct buf *b) {
   int bi = b->blockno % NBUCKET;
   acquire(&bcache.bucket[bi].latch_);
   b->refcnt++;
+  // bprint(bi, "#after pin ");
   release(&bcache.bucket[bi].latch_);
 }
 
@@ -217,6 +221,7 @@ bunpin(struct buf *b) {
   int bi = b->blockno % NBUCKET;
   acquire(&bcache.bucket[bi].latch_);
   b->refcnt--;
+  // bprint(bi, "#after unpin ");
   release(&bcache.bucket[bi].latch_);
 }
 
