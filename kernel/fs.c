@@ -365,6 +365,26 @@ iunlockput(struct inode *ip)
   iput(ip);
 }
 
+/**
+ * @brief Find idx's blockno from indirect block
+ * @param indirect_bno: indirect block number
+ * @param idx block no in the indirect block
+ * @return blockno you are looking for
+ */
+static uint
+findrect(uint dev, uint indirect_bno, uint idx){
+  struct buf *bp = bread(dev, indirect_bno);
+  uint *a = (uint *)bp->data;
+
+  uint addr;
+  if ((addr = a[idx]) == 0) {
+    a[idx] = addr = balloc(dev);
+    log_write(bp); // 修改了indirect block
+  }
+  brelse(bp);
+  return addr;
+}
+
 // Inode content
 //
 // The content (data) associated with each inode is stored
@@ -377,8 +397,7 @@ iunlockput(struct inode *ip)
 static uint
 bmap(struct inode *ip, uint bn)
 {
-  uint addr, *a;
-  struct buf *bp;
+  uint addr;
 
   if(bn < NDIRECT){
     if((addr = ip->addrs[bn]) == 0)
@@ -387,25 +406,41 @@ bmap(struct inode *ip, uint bn)
   }
   bn -= NDIRECT;
 
-  if(bn < NINDIRECT){
+  if (bn < NINDIRECT) {
     // Load indirect block, allocating if necessary.
-    if((addr = ip->addrs[NDIRECT]) == 0)
+    if ((addr = ip->addrs[NDIRECT]) == 0)
       ip->addrs[NDIRECT] = addr = balloc(ip->dev);
-    bp = bread(ip->dev, addr);
-    a = (uint*)bp->data;
-    if((addr = a[bn]) == 0){
-      a[bn] = addr = balloc(ip->dev);
-      log_write(bp);
-    }
-    brelse(bp);
-    return addr;
+    return findrect(ip->dev, addr, bn);
   }
-
+  // todo: add indirect blocks
+  bn -= NINDIRECT;
+  if (bn < NINDIRECT * NINDIRECT) {
+    if ((addr = ip->addrs[NDIRECT + 1]) == 0) {
+      ip->addrs[NDIRECT + 1] = addr = balloc(ip->dev);
+    }
+    addr = findrect(ip->dev, addr, bn / NINDIRECT);
+    return findrect(ip->dev, addr, bn % NINDIRECT);
+  }
   panic("bmap: out of range");
 }
 
+/**
+ * @brief clear indirect blocks and it's pointing blocks
+ */
+static void
+cindrect(uint dev, uint indirect_bno){
+  struct buf *bp = bread(dev, indirect_bno);
+  uint *a = (uint *)bp->data;
+  for (int j = 0; j < NINDIRECT; j++) {
+    if (a[j])
+      bfree(dev, a[j]);
+  }
+  brelse(bp);
+  bfree(dev, indirect_bno);
+}
 // Truncate inode (discard contents).
 // Caller must hold ip->lock.
+// todo: delete indirect block
 void
 itrunc(struct inode *ip)
 {
@@ -421,15 +456,19 @@ itrunc(struct inode *ip)
   }
 
   if(ip->addrs[NDIRECT]){
-    bp = bread(ip->dev, ip->addrs[NDIRECT]);
-    a = (uint*)bp->data;
-    for(j = 0; j < NINDIRECT; j++){
-      if(a[j])
-        bfree(ip->dev, a[j]);
+    cindrect(ip->dev, ip->addrs[NDIRECT]);
+    ip->addrs[NDIRECT] = 0;
+  }
+  if (ip->addrs[NDIRECT + 1]) {
+    bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+    a = (uint *)bp->data;
+    for (j = 0; j < NINDIRECT; j++) {
+      if (a[j])
+        cindrect(ip->dev, a[j]);
     }
     brelse(bp);
-    bfree(ip->dev, ip->addrs[NDIRECT]);
-    ip->addrs[NDIRECT] = 0;
+    bfree(ip->dev, ip->addrs[NDIRECT+1]);
+    ip->addrs[NDIRECT+1] = 0;
   }
 
   ip->size = 0;
