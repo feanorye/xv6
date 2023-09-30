@@ -206,7 +206,10 @@ brelse(struct buf *b)
   release(&bcache.bucket[bi].latch_);
 }
 
-// todo: log为什么要pin? 什么情况下unpin?
+/**
+ * @brief pin the buffer to avoid evict. Usually log_write would call
+ *      bpin to pin changed buffer, and unpin it when commit transaction.
+ */
 void
 bpin(struct buf *b) {
   int bi = b->blockno % NBUCKET;
