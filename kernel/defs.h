@@ -49,9 +49,9 @@ void            iupdate(struct inode*);
 int             namecmp(const char*, const char*);
 struct inode*   namei(char*);
 struct inode*   nameiparent(char*, char*);
-int             readi(struct inode*, int, uint64, uint, uint);
+int             readi(struct inode *ip, int user_dst, uint64 dst, uint off, uint n);
 void            stati(struct inode*, struct stat*);
-int             writei(struct inode*, int, uint64, uint, uint);
+int             writei(struct inode *ip, int user_src, uint64 src, uint off, uint n);
 void            itrunc(struct inode*);
 
 // ramdisk.c

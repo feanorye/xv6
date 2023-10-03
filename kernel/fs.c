@@ -412,7 +412,6 @@ bmap(struct inode *ip, uint bn)
       ip->addrs[NDIRECT] = addr = balloc(ip->dev);
     return findrect(ip->dev, addr, bn);
   }
-  // todo: add indirect blocks
   bn -= NINDIRECT;
   if (bn < NINDIRECT * NINDIRECT) {
     if ((addr = ip->addrs[NDIRECT + 1]) == 0) {
@@ -440,7 +439,6 @@ cindrect(uint dev, uint indirect_bno){
 }
 // Truncate inode (discard contents).
 // Caller must hold ip->lock.
-// todo: delete indirect block
 void
 itrunc(struct inode *ip)
 {

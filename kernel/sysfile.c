@@ -238,6 +238,10 @@ bad:
   return -1;
 }
 
+/**
+ * @brief parent path should exist.
+ * @return inode if success or path already exist. 0 if fail.
+ */
 static struct inode*
 create(char *path, short type, short major, short minor)
 {
@@ -283,6 +287,81 @@ create(char *path, short type, short major, short minor)
   return ip;
 }
 
+/**
+ * @param level recusivly level
+ * @return symlink file inode if found. 0 if fail.
+ */
+static struct inode*
+symlink_file(char *path, int level){
+  if (level >= 10) {
+    return 0;
+  }
+  struct inode *ip;
+  if ((ip = namei(path)) == 0) {
+    return 0;
+  }
+  ilock(ip);
+  if (ip->type == T_SYMLINK) {
+    char name[MAXPATH];
+    if (readi(ip, 0, (uint64)&name, 0, MAXPATH) != MAXPATH) {
+      panic("ERROR: symlink readi fail\n");
+    }
+    iunlock(ip);
+    return symlink_file(name, level + 1);
+  }
+  iunlock(ip);
+  return ip;
+}
+
+/**
+ * @brief Create file of linkpath, fill target. update parent entry
+ */
+uint64
+sys_symlink(void){
+  char name[DIRSIZ], target[MAXPATH], linkpath[MAXPATH];
+  struct inode *dp, *ip;
+
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, linkpath, MAXPATH) < 0)
+    return -1;
+
+  begin_op();
+  if((ip = create(linkpath, T_FILE, 0, 0)) == 0){
+    end_op();
+    return -1;
+  }
+
+  ilock(ip);
+  // todo: we ignore dir for now.
+  if(ip->type == T_DEVICE || ip->type == T_DIR){
+    iunlockput(ip);
+    end_op();
+    return -1;
+  }
+  if(writei(ip, 0, (uint64)&target, 0, MAXPATH) != MAXPATH){
+    panic("ERROR: symlink writei fail\n");
+  }
+  iunlock(ip);
+
+  if((dp = nameiparent(linkpath, name)) == 0)
+    goto bad;
+  ilock(dp);
+  if(dirlink(dp, name, ip->inum) < 0){
+    iunlockput(dp);
+    goto bad;
+  }
+  iunlockput(dp);
+  iput(ip);
+
+  end_op();
+
+  return 0;
+
+bad:
+  iput(ip);
+  end_op();
+  return -1;
+}
+
 uint64
 sys_open(void)
 {
@@ -296,7 +375,7 @@ sys_open(void)
     return -1;
 
   begin_op();
-
+  // 确保ip存在，且类型和权限匹配
   if(omode & O_CREATE){
     ip = create(path, T_FILE, 0, 0);
     if(ip == 0){
@@ -307,6 +386,16 @@ sys_open(void)
     if((ip = namei(path)) == 0){
       end_op();
       return -1;
+    }
+    if (ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)) {
+      char name[MAXPATH];
+      if (readi(ip, 0, (uint64)&name, 0, MAXPATH) != MAXPATH) {
+        panic("ERROR: first symlink fail\n");
+      }
+      if((ip = symlink_file(name, 1)) == 0){
+        end_op();
+        return -1;
+      }
     }
     ilock(ip);
     if(ip->type == T_DIR && omode != O_RDONLY){
