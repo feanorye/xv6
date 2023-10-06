@@ -78,18 +78,19 @@ testsymlink(void)
     fail("failed to stat b");
   if(st.type != T_SYMLINK)
     fail("b isn't a symlink");
-
+  // read from symlink
   fd2 = open("/testsymlink/b", O_RDWR);
   if(fd2 < 0)
     fail("failed to open b");
-  read(fd2, &c, 1);
+  read(fd2, &c, 1);  // should be "abcd"
   if (c != 'a')
     fail("failed to read bytes from b");
-
+  // open not existing target file
+  unlink("/testsymlink/a");
   unlink("/testsymlink/a");
   if(open("/testsymlink/b", O_RDWR) >= 0)
     fail("Should not be able to open b after deleting a");
-
+  // cycle link a->b, b->a
   r = symlink("/testsymlink/b", "/testsymlink/a");
   if(r < 0)
     fail("symlink a -> b failed");
@@ -97,11 +98,11 @@ testsymlink(void)
   r = open("/testsymlink/b", O_RDWR);
   if(r >= 0)
     fail("Should not be able to open b (cycle b->a->b->..)\n");
-  
+  // link to noneexistent file
   r = symlink("/testsymlink/nonexistent", "/testsymlink/c");
   if(r != 0)
     fail("Symlinking to nonexistent file should succeed\n");
-
+  // multiple stage link, 4-> 3-> 2-> 1
   r = symlink("/testsymlink/2", "/testsymlink/1");
   if(r) fail("Failed to link 1->2");
   r = symlink("/testsymlink/3", "/testsymlink/2");
@@ -111,7 +112,7 @@ testsymlink(void)
 
   close(fd1);
   close(fd2);
-
+  // write to file, read from symlink
   fd1 = open("/testsymlink/4", O_CREATE | O_RDWR);
   if(fd1<0) fail("Failed to create 4\n");
   fd2 = open("/testsymlink/1", O_RDWR);
@@ -147,23 +148,23 @@ concur(void)
     exit(1);
   }
   close(fd);
-
+  // multiple process, 1/3 time link y->z, 2/3 time unlink y
   for(int j = 0; j < nchild; j++) {
     pid = fork();
     if(pid < 0){
       printf("FAILED: fork failed\n");
       exit(1);
     }
-    if(pid == 0) {
+    if (pid == 0) { // Child process
       int m = 0;
       unsigned int x = (pid ? 1 : 97);
-      for(i = 0; i < 100; i++){
+      for (i = 0; i < 100; i++) {
         x = x * 1103515245 + 12345;
-        if((x % 3) == 0) {
+        if ((x % 3) == 0) {
           symlink("/testsymlink/z", "/testsymlink/y");
           if (stat_slink("/testsymlink/y", &st) == 0) {
             m++;
-            if(st.type != T_SYMLINK) {
+            if (st.type != T_SYMLINK) {
               printf("FAILED: not a symbolic link\n", st.type);
               exit(1);
             }
@@ -172,10 +173,10 @@ concur(void)
           unlink("/testsymlink/y");
         }
       }
+      printf("tried %d\n", m);
       exit(0);
     }
   }
-
   int r;
   for(int j = 0; j < nchild; j++) {
     wait(&r);

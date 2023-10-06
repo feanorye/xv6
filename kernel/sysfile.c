@@ -239,8 +239,9 @@ bad:
 }
 
 /**
- * @brief parent path should exist.
- * @return inode if success or path already exist. 0 if fail.
+ * @brief Create inode for given path, and update parent entry data(link, etc).
+ *        Note parent path should exist.
+ * @return locked inode if create success or path already exist. 0 if fail.
  */
 static struct inode*
 create(char *path, short type, short major, short minor)
@@ -252,7 +253,7 @@ create(char *path, short type, short major, short minor)
     return 0;
 
   ilock(dp);
-
+  // if file already exists
   if((ip = dirlookup(dp, name, 0)) != 0){
     iunlockput(dp);
     ilock(ip);
@@ -318,19 +319,18 @@ symlink_file(char *path, int level){
  */
 uint64
 sys_symlink(void){
-  char name[DIRSIZ], target[MAXPATH], linkpath[MAXPATH];
-  struct inode *dp, *ip;
+  char target[MAXPATH], linkpath[MAXPATH];
+  struct inode *ip;
 
   if(argstr(0, target, MAXPATH) < 0 || argstr(1, linkpath, MAXPATH) < 0)
     return -1;
 
   begin_op();
-  if((ip = create(linkpath, T_FILE, 0, 0)) == 0){
+  if((ip = create(linkpath, T_SYMLINK, 0, 0)) == 0){
     end_op();
     return -1;
   }
 
-  ilock(ip);
   // todo: we ignore dir for now.
   if(ip->type == T_DEVICE || ip->type == T_DIR){
     iunlockput(ip);
@@ -341,25 +341,8 @@ sys_symlink(void){
     panic("ERROR: symlink writei fail\n");
   }
   iunlock(ip);
-
-  if((dp = nameiparent(linkpath, name)) == 0)
-    goto bad;
-  ilock(dp);
-  if(dirlink(dp, name, ip->inum) < 0){
-    iunlockput(dp);
-    goto bad;
-  }
-  iunlockput(dp);
-  iput(ip);
-
   end_op();
-
   return 0;
-
-bad:
-  iput(ip);
-  end_op();
-  return -1;
 }
 
 uint64
