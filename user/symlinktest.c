@@ -170,6 +170,8 @@ concur(void)
             }
           }
         } else {
+          // int ret = stat_slink("/testsymlink/y", &st);
+          // printf("unlink y %d, ret %d\n", st.ino, ret);
           unlink("/testsymlink/y");
         }
       }

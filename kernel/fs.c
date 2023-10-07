@@ -189,6 +189,15 @@ iinit()
 
 static struct inode* iget(uint dev, uint inum);
 
+void iprint(){
+  struct inode *ip;
+  printf("inum:ref ");
+  for (ip = &icache.inode[0]; ip < &icache.inode[NINODE]; ip++) {
+    printf("%d:%d, ", ip->inum, ip->ref);
+  }
+  printf("\n");
+}
+
 // Allocate an inode on device dev.
 // Mark it as allocated by  giving it type type.
 // Returns an unlocked but allocated and referenced inode.
@@ -211,6 +220,7 @@ ialloc(uint dev, short type)
     }
     brelse(bp);
   }
+  // iprint();
   panic("ialloc: no inodes");
 }
 
@@ -259,8 +269,10 @@ iget(uint dev, uint inum)
   }
 
   // Recycle an inode cache entry.
-  if(empty == 0)
+  if(empty == 0){
+    // iprint();
     panic("iget: no inodes");
+  }
 
   ip = empty;
   ip->dev = dev;

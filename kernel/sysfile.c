@@ -219,7 +219,7 @@ sys_unlink(void)
   if(writei(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
     panic("unlink: writei");
   if(ip->type == T_DIR){
-    dp->nlink--;
+    dp->nlink--; // ip is sub dir of dp, so dp would lose ip's {..} link
     iupdate(dp);
   }
   iunlockput(dp);
@@ -340,7 +340,7 @@ sys_symlink(void){
   if(writei(ip, 0, (uint64)&target, 0, MAXPATH) != MAXPATH){
     panic("ERROR: symlink writei fail\n");
   }
-  iunlock(ip);
+  iunlockput(ip);
   end_op();
   return 0;
 }
