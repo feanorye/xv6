@@ -156,6 +156,7 @@ consoleintr(int c)
     }
     break;
   default:
+    // con.e 可以大于INPUT_BUF，读取位置时对INPUT_BUF取余即可 
     if(c != 0 && cons.e-cons.r < INPUT_BUF){
       c = (c == '\r') ? '\n' : c;
 

@@ -17,7 +17,7 @@ main(void)
   int pid, wpid;
 
   if(open("console", O_RDWR) < 0){
-    mknod("console", CONSOLE, 0);
+    mknod("console", CONSOLE, 0); // make inode as T_DEVICE
     open("console", O_RDWR);
   }
   dup(0);  // stdout
