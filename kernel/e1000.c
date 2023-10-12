@@ -19,7 +19,8 @@ static struct mbuf *rx_mbufs[RX_RING_SIZE];
 // remember where the e1000's registers live.
 static volatile uint32 *regs;
 
-struct spinlock e1000_lock;
+struct spinlock e1000_tx_lock;
+struct spinlock e1000_rx_lock;
 
 // called by pci_init().
 // xregs is the memory address at which the
@@ -29,7 +30,8 @@ e1000_init(uint32 *xregs)
 {
   int i;
 
-  initlock(&e1000_lock, "e1000");
+  initlock(&e1000_tx_lock, "e1000_tx");
+  initlock(&e1000_rx_lock, "e1000_rx");
 
   regs = xregs;
 
@@ -59,7 +61,7 @@ e1000_init(uint32 *xregs)
       panic("e1000");
     rx_ring[i].addr = (uint64) rx_mbufs[i]->head;
   }
-  regs[E1000_RDBAL] = (uint64) rx_ring;
+  regs[E1000_RDBAL] = (uint64) rx_ring; // 寄存器写入rx_ring地址
   if(sizeof(rx_ring) % 128 != 0)
     panic("e1000");
   regs[E1000_RDH] = 0;
@@ -92,6 +94,10 @@ e1000_init(uint32 *xregs)
   regs[E1000_IMS] = (1 << 7); // RXDW -- Receiver Descriptor Write Back
 }
 
+/**
+ * @brief find a ring tx_desc to point to mbuf.
+ * @return 0 if fail. non-zero on success.
+ */
 int
 e1000_transmit(struct mbuf *m)
 {
@@ -101,11 +107,37 @@ e1000_transmit(struct mbuf *m)
   // the mbuf contains an ethernet frame; program it into
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after sending.
-  //
-  
+  // 
+  // printf("Start transmit\n");
+
+  acquire(&e1000_tx_lock);
+  printf("%d transmit\n", myproc()->pid);
+  int idx = regs[E1000_TDT];
+  struct tx_desc tx = tx_ring[idx];
+  if (tx.status != E1000_TXD_STAT_DD) {
+    release(&e1000_tx_lock);
+    return -1;
+  }
+  if (tx_mbufs[idx] != 0) { // tx.addr could be 0 from _init()
+    mbuffree(tx_mbufs[idx]);
+  }
+  tx.addr = (uint64)m->head;
+  tx.length = m->len;
+  tx.cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS;
+  tx_ring[idx] = tx;
+
+  // stash mbuf to free
+  tx_mbufs[idx] = m;
+  regs[E1000_TDT] = (regs[E1000_TDT] + 1) % TX_RING_SIZE;
+
+  release(&e1000_tx_lock);
+  printf("%d transmit done\n", myproc()->pid);
   return 0;
 }
 
+/**
+ * @brief scan RX ring and deliver new packets muf to network stack.
+ */
 static void
 e1000_recv(void)
 {
@@ -115,6 +147,23 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
+  // printf("Start receive\n");
+  acquire(&e1000_rx_lock);
+  printf("%d recv\n", myproc()->pid);
+  int idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+  struct rx_desc rx = rx_ring[idx];
+  if(rx.status & E1000_RXD_STAT_DD){
+    rx_mbufs[idx]->len = rx.length;
+    net_rx(rx_mbufs[idx]);
+    rx_mbufs[idx] = mbufalloc(0);
+    if (!rx_mbufs[idx])
+      panic("e1000");
+    rx_ring[idx].addr = (uint64) rx_mbufs[idx]->head;
+    rx_ring[idx].status = 0;
+    regs[E1000_RDT] = idx;
+  }
+  release(&e1000_rx_lock);
+  printf("%d recv done\n", myproc()->pid);
 }
 
 void
@@ -124,6 +173,6 @@ e1000_intr(void)
   // without this the e1000 won't raise any
   // further interrupts.
   regs[E1000_ICR] = 0xffffffff;
-
+  printf("%d interupt\n", myproc()->pid);
   e1000_recv();
 }

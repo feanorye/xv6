@@ -172,6 +172,7 @@ net_tx_eth(struct mbuf *m, uint16 ethtype)
   // to broadcast instead.
   memmove(ethhdr->dhost, broadcast_mac, ETHADDR_LEN);
   ethhdr->type = htons(ethtype);
+  // todo: 只在成功发送时，才会free. 所以，新的发送请求中，发现未释放的mbuf，是不是可以释放？
   if (e1000_transmit(m)) {
     mbuffree(m);
   }
