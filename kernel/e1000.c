@@ -111,7 +111,7 @@ e1000_transmit(struct mbuf *m)
   // printf("Start transmit\n");
 
   acquire(&e1000_tx_lock);
-  printf("%d transmit\n", myproc()->pid);
+  printf("%d transmit\n", myproc());
   int idx = regs[E1000_TDT];
   struct tx_desc tx = tx_ring[idx];
   if (tx.status != E1000_TXD_STAT_DD) {
@@ -131,7 +131,7 @@ e1000_transmit(struct mbuf *m)
   regs[E1000_TDT] = (regs[E1000_TDT] + 1) % TX_RING_SIZE;
 
   release(&e1000_tx_lock);
-  printf("%d transmit done\n", myproc()->pid);
+  printf("%d transmit done\n", myproc());
   return 0;
 }
 
@@ -149,21 +149,25 @@ e1000_recv(void)
   //
   // printf("Start receive\n");
   acquire(&e1000_rx_lock);
-  printf("%d recv\n", myproc()->pid);
-  int idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
-  struct rx_desc rx = rx_ring[idx];
-  if(rx.status & E1000_RXD_STAT_DD){
-    rx_mbufs[idx]->len = rx.length;
-    net_rx(rx_mbufs[idx]);
-    rx_mbufs[idx] = mbufalloc(0);
-    if (!rx_mbufs[idx])
-      panic("e1000");
-    rx_ring[idx].addr = (uint64) rx_mbufs[idx]->head;
-    rx_ring[idx].status = 0;
-    regs[E1000_RDT] = idx;
+  printf("%d recv\n", myproc());
+  while (1) {
+    int idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+    struct rx_desc rx = rx_ring[idx];
+    if (rx.status & E1000_RXD_STAT_DD) {
+      rx_mbufs[idx]->len = rx.length;
+      net_rx(rx_mbufs[idx]);
+      rx_mbufs[idx] = mbufalloc(0);
+      if (!rx_mbufs[idx])
+        panic("e1000");
+      rx_ring[idx].addr = (uint64)rx_mbufs[idx]->head;
+      rx_ring[idx].status = 0;
+      regs[E1000_RDT] = idx;
+    }else{
+      break;
+    }
   }
   release(&e1000_rx_lock);
-  printf("%d recv done\n", myproc()->pid);
+  printf("%d recv done\n", myproc());
 }
 
 void
@@ -173,6 +177,6 @@ e1000_intr(void)
   // without this the e1000 won't raise any
   // further interrupts.
   regs[E1000_ICR] = 0xffffffff;
-  printf("%d interupt\n", myproc()->pid);
+  printf("%d interupt\n", myproc());
   e1000_recv();
 }

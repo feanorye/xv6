@@ -245,6 +245,7 @@ main(int argc, char *argv[])
       ping(2000 + i + 1, dport, 1);
       exit(0);
     }
+    // printf("#PID %x ping\n", pid);
   }
   for (i = 0; i < 10; i++){
     wait(&ret);
